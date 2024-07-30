@@ -1,0 +1,11 @@
+"AddonInfo"
+{
+	"name"				"Police Batton"
+	"version"			"1"
+	"up_date"			"04/02/16"
+	"author_name"			"Drover"
+	"author_email"			""
+	"author_url"			""
+	"info"				""
+	"override"			"0"
+}
