@@ -1,6 +1,8 @@
 AddCSLuaFile()
 if SERVER then
     AddCSLuaFile("cl_init.lua")
+	util.AddNetworkString("ArrestReason")
+	util.AddNetworkString("ArrestReasonMessage")
 end
 
 /* 
@@ -117,18 +119,26 @@ end
 SWEP.menuButtons[3] = {}
 SWEP.menuButtons[3].buttonText = "Arrest";
 SWEP.menuButtons[3].left = true;
-SWEP.menuButtons[3].func = function(owner,ent)
-	if owner:GetPos():Distance(ent:GetPos()) > 150 then return end;
-	if not ent.stunnedBaton then DarkRP.notify(owner, 1, 4, "Target needs to be stunned!") return end;
-	if ent:isArrested() then  ent:arrest(nil, owner) return end;
-	if ent:isCP() and not GAMEMODE.Config.cpcanarrestcp then return end;
-	local jpc = DarkRP.jailPosCount()
+SWEP.menuButtons[3].func = function(owner, ent)
+    if owner:GetPos():Distance(ent:GetPos()) > 150 then return end
+    if not ent.stunnedBaton then DarkRP.notify(owner, 1, 4, "Target needs to be stunned!") return end
+    if ent:isArrested() then return end
+    if ent:isCP() and not GAMEMODE.Config.cpcanarrestcp then return end
+    
+    local jpc = DarkRP.jailPosCount()
     if not jpc or jpc == 0 then
         DarkRP.notify(owner, 1, 4, DarkRP.getPhrase("cant_arrest_no_jail_pos"))
     else
         if not ent.Babygod then
+            -- Arrest the player immediately
             ent:arrest(nil, owner)
             DarkRP.notify(ent, 0, 20, DarkRP.getPhrase("youre_arrested_by", owner:Nick()))
+            
+            -- Then prompt for a reason
+            net.Start("ArrestReason")
+            net.WriteEntity(ent)
+            net.Send(owner)
+            
             if owner.SteamName then
                 DarkRP.log(owner:Nick() .. " (" .. owner:SteamID() .. ") arrested " .. ent:Nick(), Color(0, 255, 255))
             end
@@ -402,3 +412,116 @@ end
 				Draw circles
 ---------------------------------------------------------------------------------------------------------------------------------------------
 */
+
+
+
+
+
+
+-- NADIES ARREST REASON PROMPT STUFF THINGY..........
+
+
+local color_red = Color(255, 0, 0)
+
+if CLIENT then
+    local function CreateMinimalistFrame(title)
+        local frame = vgui.Create("DFrame")
+        frame:SetSize(300, 180)
+        frame:Center()
+        frame:SetTitle("")
+        frame:SetDraggable(true)
+        frame:ShowCloseButton(false)
+        frame:MakePopup()
+
+        local titleBarHeight = 30
+		surface.SetFont("DermaDefaultBold")
+		local tw, th = surface.GetTextSize(title)
+
+        frame.Paint = function(self, w, h)
+            -- Title bar
+            draw.RoundedBoxEx(4, 0, 0, w, titleBarHeight, Color(50, 50, 50), true, true, false, false)
+            draw.SimpleText(title, "DermaDefaultBold", (w / 2) - tw / 2, titleBarHeight/2, Color(240, 240, 240), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            
+            -- Main body
+            draw.RoundedBoxEx(4, 0, titleBarHeight, w, h - titleBarHeight, Color(70, 70, 70), false, false, true, true)
+        end
+
+        local closeButton = vgui.Create("DButton", frame)
+        closeButton:SetSize(20, 20)
+        closeButton:SetPos(frame:GetWide() - 25, 5)
+        closeButton:SetText("✕")
+        closeButton:SetTextColor(Color(240, 240, 240))
+        closeButton.Paint = function() end
+        closeButton.DoClick = function() frame:Close() end
+
+        return frame, titleBarHeight
+    end
+
+    net.Receive("ArrestReason", function()
+        local target = net.ReadEntity()
+        
+        local frame, titleBarHeight = CreateMinimalistFrame("Arrest Reason")
+
+        local textEntry = vgui.Create("DTextEntry", frame)
+        textEntry:SetSize(280, 30)
+        textEntry:SetPos(10, titleBarHeight + 20)
+        textEntry:SetPlaceholderText("Enter reason for arrest...")
+        textEntry:SetTextColor(Color(240, 240, 240))
+        textEntry:SetPlaceholderColor(Color(180, 180, 180))
+        textEntry.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(60, 60, 60))
+            self:DrawTextEntryText(self:GetTextColor(), self:GetHighlightColor(), self:GetCursorColor())
+        end
+
+        local submitButton = vgui.Create("DButton", frame)
+        submitButton:SetSize(280, 30)
+        submitButton:SetPos(10, titleBarHeight + 60)
+        submitButton:SetText("Submit")
+        submitButton:SetTextColor(Color(240, 240, 240))
+        submitButton.Paint = function(self, w, h)
+            draw.RoundedBox(4, 0, 0, w, h, Color(70, 130, 180))
+        end
+        submitButton.DoClick = function()
+            local reason = textEntry:GetValue()
+            net.Start("ArrestReason")
+            net.WriteEntity(target)
+            net.WriteString(reason)
+            net.SendToServer()
+            frame:Close()
+        end
+    end)
+
+    net.Receive("ArrestReasonMessage", function()
+        local arrester = net.ReadString()
+        local arrested = net.ReadString()
+        local reason = net.ReadString()
+
+        chat.AddText(color_red, "VN | ", Color(69, 112, 255), arrested, color_white, " was arrested by ", Color(69, 112, 255), arrester, color_white, " for: ", color_red, reason)
+    end)
+end
+
+if SERVER then
+    net.Receive("ArrestReason", function(len, ply)
+        local target = net.ReadEntity()
+        local reason = net.ReadString()
+        
+        if IsValid(target) and target:IsPlayer() and target:isArrested() then
+            local arrester = ply:Nick()
+			local arrested = target:Nick()
+
+			net.Start("ArrestReasonMessage")
+			net.WriteString(arrester)
+			net.WriteString(arrested)
+			net.WriteString(reason)
+			net.Broadcast()
+            
+            DarkRP.log(ply:Nick() .. " (" .. ply:SteamID() .. ") arrest reason for " .. target:Nick() .. ": " .. reason, Color(0, 255, 255))
+        end
+    end)
+end
+
+hook.Add("PlayerInitialSpawn", "KANYEJOINED", function(ply)
+	if ply:SteamID64() == kanyeSteamID then
+		chat.AddText("[ALERT] THE ALPHA HAS LANDED")
+	end	
+end)
